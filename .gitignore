@@ -1,23 +1,25 @@
+# Python
 __pycache__/
 *.py[cod]
+
+# Virtualenv
 .venv/
+
+# Pytest
 .pytest_cache/
-.env
-.env.*
-.idea/
-.vscode/
-.cursor/
-allure-results/
-allure-report/
-__pycache__/
-*.py[cod]
-.venv/
-.pytest_cache/
+
+# Secrets
 .env
 .env.*
 !.env.example
+
+# IDE
 .idea/
 .vscode/
+
+# Cursor
 .cursor/
+
+# Reports
 allure-results/
 allure-report/
