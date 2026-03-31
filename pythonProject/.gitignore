@@ -1,0 +1,18 @@
+# Secrets / local env
+.env
+connection_config.ini
+tests/connection_config.ini
+
+# Python / venv
+.venv/
+__pycache__/
+*.py[cod]
+
+# Pytest / tooling
+.pytest_cache/
+.xdist_worker_results/
+reports/
+
+# OS / editor
+.DS_Store
+Thumbs.db

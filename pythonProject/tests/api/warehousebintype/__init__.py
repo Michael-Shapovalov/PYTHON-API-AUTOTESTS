@@ -1,0 +1,2 @@
+"""WarehouseBinType API tests package."""
+

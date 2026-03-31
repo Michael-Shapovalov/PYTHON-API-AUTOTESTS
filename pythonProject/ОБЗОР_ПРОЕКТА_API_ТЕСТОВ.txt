@@ -1,0 +1,366 @@
+================================================================================
+  ОБЗОР ПРОЕКТА: API АВТОТЕСТЫ (Python)
+  Документ для быстрого понимания структуры, технологий и работы тестов
+  Для людей с небольшим опытом в Python и тестировании
+================================================================================
+
+СОДЕРЖАНИЕ
+  1. О чём проект
+  2. Структура папок и файлов
+  3. Подключённые библиотеки
+  4. Как устроено тестирование
+  5. Схемы и потоки
+  6. Примеры кода
+  7. Как запускать тесты
+  8. Краткие выводы по проекту
+
+--------------------------------------------------------------------------------
+1. О ЧЁМ ПРОЕКТ
+--------------------------------------------------------------------------------
+
+Проект — это набор автоматических тестов для REST API. Тесты проверяют два
+раздела API:
+  • Unit (единицы измерения) — создание, чтение, обновление, удаление единиц.
+  • UnitGroup (группы единиц измерения) — то же для групп единиц.
+
+Тесты пишутся на Python, запускаются с помощью pytest. Используется один общий
+сервер API (адрес и логин/пароль задаются в файле .env). Тесты проверяют
+коды ответов (200, 401, 400 и т.д.), структуру JSON и соответствие ответов
+схемам из swagger.json.
+
+--------------------------------------------------------------------------------
+2. СТРУКТУРА ПРОЕКТА
+--------------------------------------------------------------------------------
+
+Корень проекта (pythonProject):
+
+  pythonProject/
+  │
+  ├── .env                    ← НЕ в репозитории! Создать вручную.
+  │                            Содержит: BASE_SERVER_URL, ADMIN_USERNAME, ADMIN_PASSWORD
+  │
+  ├── requirements.txt        ← Список библиотек (pytest, requests, jsonschema и др.)
+  ├── swagger.json            ← Описание API и схем ответов (OpenAPI)
+  ├── README.md               ← Инструкция по запуску (рус.)
+  ├── scriptDBMS.sql         ← Скрипт БД (справочно)
+  │
+  └── tests/                  ← ВСЁ, что относится к тестам
+      │
+      ├── pytest.ini          ← Настройки pytest (маркеры, addopts)
+      ├── conftest.py         ← Общие фикстуры (URL, авторизация) и хуки (таблица итогов)
+      │
+      └── api/
+          ├── unit/           ← Тесты API "Единицы измерения" (Unit)
+          │   ├── test_unit_get.py
+          │   ├── test_unit_post.py
+          │   ├── test_unit_create_or_update.py
+          │   ├── test_unit_create_or_update_many.py
+          │   ├── test_unit_delete.py
+          │   ├── test_unit_delete_many.py
+          │   ├── checks_unit_*.md    ← Описание проверок по каждому методу
+          │   └── README.md
+          │
+          └── unitgroup/      ← Тесты API "Группы единиц" (UnitGroup)
+              ├── test_unitgroup_get.py
+              ├── test_unitgroup_post.py
+              ├── test_unitgroup_create_or_update.py
+              ├── test_unitgroup_create_or_update_many.py
+              ├── test_unitgroup_delete.py
+              ├── test_unitgroup_delete_many.py
+              ├── checks_unitgroup_*.md
+              └── README.md
+
+Идея: один файл тестов — один HTTP-метод или один тип операции (GET, POST, PUT, Delete и т.д.).
+
+--------------------------------------------------------------------------------
+3. ПОДКЛЮЧЁННЫЕ БИБЛИОТЕКИ
+--------------------------------------------------------------------------------
+
+Файл: requirements.txt
+
+  pytest          — запуск тестов, фикстуры, маркеры
+  pytest-xdist    — параллельный запуск тестов (-n 2, -n auto)
+  requests        — HTTP-запросы к API (get, post, put, patch)
+  python-dotenv   — загрузка переменных из .env (URL, логин, пароль)
+  httpx           — в списке, но в коде тестов используется requests
+  pydantic        — в списке; в тестах напрямую не используется
+  jsonschema      — проверка ответа API по схеме из swagger
+  jsonref         — разбор $ref в swagger.json при загрузке схем
+
+Кратко по ролям:
+  • requests — все вызовы к серверу (GET /Unit, PUT /Unit/CreateOrUpdate и т.д.).
+  • jsonschema + jsonref — взять схему из swagger.json и проверить, что response.json() ей соответствует.
+  • pytest — обнаружить тесты (функции test_*), запустить их, выдать отчёт.
+  • pytest-xdist — раздать тесты по нескольким процессам (воркерам), чтобы прогон был быстрее.
+  • python-dotenv — прочитать .env один раз при старте и подставить BASE_SERVER_URL и учётные данные.
+
+--------------------------------------------------------------------------------
+4. КАК УСТРОЕНО ТЕСТИРОВАНИЕ
+--------------------------------------------------------------------------------
+
+4.1. Конфигурация и окружение
+
+  • Базовый URL и авторизация задаются один раз на всю сессию (фикстуры в conftest.py).
+  • base_server_url — читается из переменной окружения BASE_SERVER_URL (через .env).
+  • admin_auth — Basic Auth из ADMIN_USERNAME и ADMIN_PASSWORD.
+  • Если в .env чего-то нет — pytest сразу завершает прогон с сообщением (pytest.fail).
+
+4.2. Фикстуры (fixtures)
+
+  В conftest.py (на уровне tests/):
+    - base_server_url  (scope="session") — URL сервера
+    - admin_auth       (scope="session") — объект авторизации для requests
+
+  В модулях тестов (unit/ и unitgroup/) есть свои фикстуры, например:
+    - unit_created_for_get — создаёт одну единицу через PUT, чтобы тесты GET могли что-то найти
+    - unit_created_for_delete — создаёт единицу для теста удаления
+    - two_units_created_for_delete_many — создаёт две единицы для теста массового удаления
+
+  Они вызывают API (PUT CreateOrUpdate), проверяют ответ и отдают тесту URL, auth и данные
+  созданной сущности (yield). Так тесты не зависят от того, пустая БД или нет.
+
+4.3. Запросы к API
+
+  В каждом модуле — свои вспомогательные функции, которые делают HTTP-запрос:
+    - _get_unit_response(...)  — GET с параметрами pageNum, pageSize
+    - _put_unit(...)           — PUT /Unit/CreateOrUpdate
+    - _patch_delete(...)       — PATCH /Unit/Delete
+    и т.д.
+
+  Везде используются:
+    - requests.get / post / put / patch
+    - заголовки: Content-Type: application/json, Accept: application/json
+    - auth=admin_auth
+    - timeout (обычно 30 сек)
+  Ошибки соединения (ConnectTimeout, ConnectionError) перехватываются и превращаются
+  в pytest.fail с понятным сообщением («нет связи с сервером»).
+
+4.4. Проверки (assert)
+
+  • Статус: assert response.status_code == 200 (или 401, 400, 404 и т.д.)
+  • Тело ответа: assert response.json().get("added") == 1 или get("updated") == 1
+  • Структура: наличие полей (pageNum, totalPages, items и т.д.), items — список
+  • Схема: для успешных 200 ответов — jsonschema.validate(instance=response.json(), schema=...)
+    Схема берётся из swagger.json (PaginatedListOfRestUnit, RestResponseDtoOfRestUnit и т.д.).
+
+4.5. Логирование и отчёты
+
+  • В начале теста: print("\n  === Тест: <название> ===\n")
+  • Перед проверкой: _log_check("что проверяется", ожидаемый, фактический)
+  • Русские названия тестов задаются маркером: @pytest.mark.test_name_ru("Название на русском")
+  • В конце прогона выводится таблица «ИТОГИ ПРОГОНА ТЕСТОВ»: название теста и ПРОЙДЕН / НЕ ПРОЙДЕН.
+  • При параллельном запуске (pytest-xdist) stdout воркеров не виден в главном процессе,
+    поэтому в conftest.py stdout перенаправлен в stderr — тогда логи и таблица всё равно видны.
+
+4.6. Связь Unit и UnitGroup
+
+  UnitGroup содержит ссылку на Unit (baseUnit). Поэтому тесты UnitGroup создают сначала
+  одну единицу (Unit) через общие функции из tests.api.unit (build_unique_unit_payload,
+  _put_unit, _find_unit_by и т.д.), получают её id и подставляют в payload группы единиц.
+  Импорты идут из test_unit_create_or_update и test_unit_get.
+
+--------------------------------------------------------------------------------
+5. СХЕМЫ И ПОТОКИ
+--------------------------------------------------------------------------------
+
+5.1. Общая схема запуска
+
+    [.env]  ──►  conftest.py (load_dotenv, base_server_url, admin_auth)
+                        │
+                        ▼
+    [pytest]  собирает тесты из tests/api/unit/ и tests/api/unitgroup/
+                        │
+                        ▼
+    Для каждого теста:  подставляет фикстуры (base_server_url, admin_auth, unit_created_...)
+                        │
+                        ▼
+    Тест вызывает API (requests), проверяет response.status_code и response.json()
+    и при необходимости — jsonschema.validate(response.json(), schema из swagger.json)
+                        │
+                        ▼
+    Результат (passed/failed) записывается в таблицу и выводится в конце прогона.
+
+5.2. Эндпоинты API (шаблон)
+
+    Базовый URL берётся из BASE_SERVER_URL (без завершающего слеша в коде подставляется сам).
+
+    Unit:
+      GET   {base}/Unit
+      POST  {base}/Unit
+      PUT   {base}/Unit/CreateOrUpdate
+      PUT   {base}/Unit/CreateOrUpdateMany
+      PATCH {base}/Unit/Delete
+      PATCH {base}/Unit/DeleteMany
+
+    UnitGroup:
+      GET   {base}/UnitGroup
+      POST  {base}/UnitGroup
+      PUT   {base}/UnitGroup/CreateOrUpdate
+      PUT   {base}/UnitGroup/CreateOrUpdateMany
+      PATCH {base}/UnitGroup/Delete
+      PATCH {base}/UnitGroup/DeleteMany
+
+5.3. Откуда берётся схема для проверки ответа
+
+    swagger.json  ──►  components.schemas  ──►  jsonref.replace_refs(...)  ──►
+    ──►  _openapi_nullable_to_jsonschema(...)  ──►  _merge_allof(...)  ──►
+    ──►  jsonschema.validate(instance=response.json(), schema=schema)
+
+    Примеры имён схем:
+      GET /Unit, POST /Unit              → PaginatedListOfRestUnit
+      PUT /Unit/CreateOrUpdate            → RestResponseDtoOfRestUnit
+      GET /UnitGroup, POST /UnitGroup    → PaginatedListOfRestUnitGroup
+      PUT /UnitGroup/CreateOrUpdate       → RestResponseDtoOfRestUnitGroup
+
+--------------------------------------------------------------------------------
+6. ПРИМЕРЫ КОДА
+--------------------------------------------------------------------------------
+
+6.1. Фикстуры в conftest.py (сессия)
+
+    @pytest.fixture(scope="session")
+    def base_server_url() -> str:
+        url = os.getenv("BASE_SERVER_URL")
+        if not url:
+            pytest.fail("BASE_SERVER_URL not set in .env")
+        return url
+
+    @pytest.fixture(scope="session")
+    def admin_auth():
+        from requests.auth import HTTPBasicAuth
+        username = os.getenv("ADMIN_USERNAME")
+        password = os.getenv("ADMIN_PASSWORD")
+        if not username or not password:
+            pytest.fail("ADMIN_USERNAME or ADMIN_PASSWORD not set in .env")
+        return HTTPBasicAuth(username, password)
+
+6.2. Создание уникальных данных для Unit (test_unit_create_or_update.py)
+
+    def build_unique_unit_payload() -> dict:
+        suffix = uuid.uuid4().hex[:12]
+        unique_part = f"UT{suffix}"
+        return {
+            "integrationId": f"unit-test-{suffix}"[:100],
+            "code": unique_part[:30],
+            "name": f"Единица измерения тест {suffix}"[:250],
+            "acronym": unique_part[:30],
+            "description": f"Тестовая единица измерения, создана автотестом. {suffix}"[:4000],
+            "internationalAcronym": unique_part[:3],
+            "isDivisible": True,
+            "precision": 2,
+        }
+
+  Так каждый запуск создаёт новую запись с уникальными code, acronym, integrationId —
+  тесты не конфликтуют друг с другом и с параллельным запуском (-n 2).
+
+6.3. Запрос GET и проверка схемы (test_unit_get.py)
+
+    def _get_unit_response(get_url, admin_auth, page_num=0, page_size=0, no_count=False, timeout=30):
+        try:
+            r = requests.get(
+                get_url,
+                params={"pageNum": page_num, "pageSize": page_size, "noCount": no_count},
+                auth=admin_auth,
+                headers={"Accept": "application/json"},
+                timeout=timeout,
+            )
+        except (ConnectTimeout, RequestsConnectionError) as e:
+            pytest.fail(f"GET /Unit: нет связи с сервером: {e}")
+        return r
+
+    # В тесте:
+    response = _get_unit_response(get_url, admin_auth)
+    assert response.status_code == 200
+    data = response.json()
+    assert "items" in data
+    schema = get_unit_get_response_schema()
+    jsonschema.validate(instance=data, schema=schema)
+
+6.4. Фикстура «единица создана для GET» (test_unit_get.py)
+
+    @pytest.fixture(scope="module")
+    def unit_created_for_get(base_server_url, admin_auth):
+        base = base_server_url.rstrip("/")
+        put_url = f"{base}/Unit/CreateOrUpdate"
+        get_url = f"{base}/Unit"
+        payload = build_unique_unit_payload()
+        response = _put_unit(put_url, payload=payload, auth=admin_auth)
+        assert response.status_code == 200, response.text
+        assert response.json().get("added") == 1 or response.json().get("updated") == 1
+        yield get_url, admin_auth, payload
+
+  Тест, который использует unit_created_for_get, получает готовые get_url, admin_auth и payload
+  созданной единицы (чтобы искать её в items по integrationId или id).
+
+6.5. Маркеры и русское название теста (pytest.ini + тест)
+
+    В pytest.ini:
+      markers =
+          regression: регрессионные тесты
+          validation: тесты валидации полей
+          negative: негативные тесты
+          test_name_ru: русское название для отчёта (параметр: строка)
+          fast: быстрый (smoke) набор
+          slow: полный набор
+
+    В тесте:
+      @pytest.mark.fast
+      @pytest.mark.test_name_ru("GET /Unit — успешный ответ 200 и структура списка")
+      def test_unit_get_success(unit_created_for_get):
+          ...
+
+--------------------------------------------------------------------------------
+7. КАК ЗАПУСКАТЬ ТЕСТЫ
+--------------------------------------------------------------------------------
+
+  Предварительно:
+    - Установить зависимости: pip install -r requirements.txt
+    - В корне проекта создать .env с BASE_SERVER_URL, ADMIN_USERNAME, ADMIN_PASSWORD
+    - Запуск выполнять из каталога tests (где лежит pytest.ini)
+
+  Основные команды (из каталога tests):
+
+    Тесты Unit (единицы измерения):
+      pytest api/unit -m fast -v -s          — только smoke (быстро)
+      pytest api/unit -v -s                  — все тесты Unit
+      pytest api/unit -n 2 -v -s             — все тесты, 2 воркера (параллельно)
+      pytest api/unit -m slow -v -s          — только «медленные» (без smoke)
+
+    Тесты UnitGroup (группы единиц):
+      pytest api/unitgroup -m fast -v -s     — smoke
+      pytest api/unitgroup -v -s             — полный набор
+      pytest api/unitgroup -n 2 -v -s         — полный набор, 2 воркера
+
+  Опции:
+    -v        — подробный вывод (имя каждого теста)
+    -s        — не перехватывать print (логи и «Проверка: …» видны в консоли)
+    -n 2      — два процесса (pytest-xdist)
+    -n auto   — число процессов по числу ядер CPU
+    -m fast   — только тесты с маркером fast (smoke)
+    -m slow   — только тесты с маркером slow
+
+--------------------------------------------------------------------------------
+8. КРАТКИЕ ВЫВОДЫ ПО ПРОЕКТУ
+--------------------------------------------------------------------------------
+
+  • Назначение: автоматическая проверка REST API для Unit и UnitGroup (CRUD и списки).
+  • Стек: Python, pytest, requests, jsonschema/jsonref, swagger.json, Basic Auth.
+  • Структура: тесты разбиты по ресурсам (unit / unitgroup) и по операциям (get, post,
+    create_or_update, delete и т.д.); общие настройки и фикстуры в conftest.py.
+  • Данные: уникальные payload (uuid, суффиксы), чтобы тесты не конфликтовали при
+    параллельном запуске и повторных прогонах.
+  • Проверки: статус-код, наличие полей, значения (added/updated/deleted), при успехе 200 —
+    валидация тела ответа по схеме из swagger.json.
+  • Запуск: из каталога tests; smoke (-m fast) для быстрой проверки, полный прогон для
+    регрессии; при необходимости — параллельно (-n 2 или -n auto).
+  • Документация: README в корне и в tests/api/unit, tests/api/unitgroup; файлы
+    checks_*.md описывают проверки по каждому методу; итоговая таблица с русскими
+    названиями тестов выводится в конец прогона.
+
+  Проект понятен новичку: достаточно знать, где лежат тесты, что в .env задаётся сервер
+  и авторизация, а запуск — из папки tests командой pytest с нужными маркерами и путём
+  (api/unit или api/unitgroup).
+
+================================================================================
+  Конец обзора
+================================================================================

@@ -1,0 +1,2 @@
+"""ManufacturingBillTemplate smoke test package."""
+

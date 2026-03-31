@@ -1,0 +1,13 @@
+[testit]
+url = https://testit.zyfra.com
+privateToken =
+projectId =
+configurationId = ce89a13c-0062-48bd-85c7-e051dfd72fe3
+adapterMode = 2
+
+# (опционально)
+# testRunName = Pytest API run
+# certValidation = true
+# automaticCreationTestCases = false
+# importRealtime = true
+

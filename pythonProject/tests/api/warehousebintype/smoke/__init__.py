@@ -1,0 +1,2 @@
+"""WarehouseBinType smoke tests."""
+

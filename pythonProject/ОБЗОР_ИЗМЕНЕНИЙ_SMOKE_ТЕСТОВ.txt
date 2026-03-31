@@ -1,0 +1,276 @@
+================================================================================
+  ОБЗОР ИЗМЕНЕНИЙ: НОВЫЕ НАБОРЫ SMOKE-ТЕСТОВ
+  Документ описывает добавленные smoke-тесты для Unit и UnitGroup
+  Структура — по образцу ОБЗОР_ПРОЕКТА_API_ТЕСТОВ.txt
+================================================================================
+
+СОДЕРЖАНИЕ
+  1. О чём изменения
+  2. Структура новых папок и файлов
+  3. Новые зависимости и маркеры
+  4. Как устроены smoke-тесты
+  5. Схема smoke-прогона (порядок тестов)
+  6. Примеры кода (фикстуры и тесты)
+  7. Как запускать smoke-тесты
+  8. Краткие выводы
+
+--------------------------------------------------------------------------------
+1. О ЧЁМ ИЗМЕНЕНИЯ
+--------------------------------------------------------------------------------
+
+Добавлены отдельные наборы smoke-тестов (минимальные проверки работоспособности
+API) для двух сущностей:
+
+  • Unit (единицы измерения)   — папка tests/api/unit/smoke/
+  • UnitGroup (группы единиц)   — папка tests/api/unitgroup/smoke/
+
+Особенности:
+  • Тесты вынесены в отдельные папки smoke/ внутри api/unit и api/unitgroup.
+  • Все smoke-тесты помечены маркером smoke; запуск отдельно: pytest -m smoke.
+  • Один последовательный сценарий на сущность: создание одного объекта →
+    создание пачки (два объекта) → GET списка → удаление одного → POST с фильтром →
+    удаление пачки → финальный GET (проверка чистоты). Созданные данные удаляются
+    в конце сценария самими тестами (Delete и DeleteMany).
+  • Порядок выполнения задаётся плагином pytest-order (order 1 … 7).
+  • Состояние между тестами (id и integrationId созданных объектов) передаётся
+    через общую фикстуру smoke_state (scope=module).
+  • Проверки на 401 без авторизации в smoke не включены (по требованию).
+
+Изменённые файлы проекта:
+  • tests/pytest.ini       — добавлен маркер smoke
+  • requirements.txt       — добавлена зависимость pytest-order
+
+--------------------------------------------------------------------------------
+2. СТРУКТУРА НОВЫХ ПАПОК И ФАЙЛОВ
+--------------------------------------------------------------------------------
+
+Корень проекта (pythonProject) — без изменений структуры корня.
+В каталоге tests/ добавлено следующее.
+
+  tests/
+  │
+  ├── pytest.ini            ← ИЗМЕНЁН: добавлен маркер smoke
+  │
+  └── api/
+      ├── unit/
+      │   ├── ...           ← существующие тесты (без изменений)
+      │   └── smoke/        ← НОВАЯ ПАПКА
+      │       ├── __init__.py
+      │       └── test_unit_smoke_flow.py    ← 7 тестов (order 1–7)
+      │
+      └── unitgroup/
+          ├── ...           ← существующие тесты (без изменений)
+          └── smoke/        ← НОВАЯ ПАПКА
+              ├── __init__.py
+              └── test_unitgroup_smoke_flow.py   ← 7 тестов (order 1–7)
+
+Идея: smoke-тесты изолированы от полного набора (unit/ и unitgroup/), запускаются
+по маркеру -m smoke или по пути api/unit/smoke и api/unitgroup/smoke.
+
+--------------------------------------------------------------------------------
+3. НОВЫЕ ЗАВИСИМОСТИ И МАРКЕРЫ
+--------------------------------------------------------------------------------
+
+3.1. requirements.txt
+
+  Добавлена строка:
+    pytest-order   — задаёт порядок выполнения тестов (@pytest.mark.order(N))
+
+  Остальные зависимости без изменений (pytest, pytest-xdist, requests и т.д.).
+
+3.2. pytest.ini — маркеры
+
+  Добавлен маркер:
+    smoke: smoke-тесты, минимальные проверки работоспособности API
+
+  Запуск только smoke: pytest -m smoke -v -s
+  Запуск без smoke (полная регрессия): pytest -m "not smoke" -v -s
+
+--------------------------------------------------------------------------------
+4. КАК УСТРОЕНЫ SMOKE-ТЕСТЫ
+--------------------------------------------------------------------------------
+
+4.1. Общие принципы
+
+  • Один модуль на сущность: test_unit_smoke_flow.py и test_unitgroup_smoke_flow.py.
+  • В каждом модуле — 7 тест-функций с декораторами @pytest.mark.smoke и
+    @pytest.mark.order(1) … @pytest.mark.order(7).
+  • Фикстура smoke_state (scope="module") — словарь, в котором тесты сохраняют
+    id и integrationId созданных объектов (A — один объект, B1 и B2 — два объекта
+    из CreateOrUpdateMany). Следующие тесты читают эти данные для GET, Delete,
+    POST-фильтра и DeleteMany.
+  • Фикстура smoke_urls (scope="module") — URL для PUT, GET, POST и база для
+    Delete/DeleteMany (чтобы не дублировать base_server_url в каждом тесте).
+
+4.2. Unit (tests/api/unit/smoke/)
+
+  • Переиспользуются хелперы из существующих тестов Unit:
+      build_unique_unit_payload, _put_unit, _get_units_list, _find_unit_by,
+      _patch_delete, _patch_delete_many, _put_create_or_update_many, _post_unit.
+  • Минимально валидный payload с полями для поиска (integrationId, code) —
+    build_unique_unit_payload().
+  • Состояние: unit_a_id, unit_a_integration_id, unit_b_ids, unit_b_integration_ids.
+
+4.3. UnitGroup (tests/api/unitgroup/smoke/)
+
+  • UnitGroup требует ссылку на Unit (baseUnit) в каждом payload. Добавлена
+    фикстура smoke_base_unit_ref (scope="module"): один раз создаётся Unit через
+    ensure_one_unit_and_get_ref(), возвращается {"id": unit_id} для подстановки
+    в build_unique_unitgroup_payload(base_unit_ref).
+  • Переиспользуются хелперы из тестов UnitGroup:
+      build_unique_unitgroup_payload, ensure_one_unit_and_get_ref, _put_unitgroup,
+      _get_unitgroups_list, _find_unitgroup_by, _patch_delete, _patch_delete_many,
+      _put_create_or_update_many, _post_unitgroup.
+  • Состояние: unitgroup_a_id, unitgroup_a_integration_id, unitgroup_b_ids,
+    unitgroup_b_integration_ids.
+
+4.4. Проверки в тестах
+
+  • Создание (test_01): 200, валидный JSON, count==1, added==1, errors==0,
+    len(results)==1, при наличии — result=="Added", в entity есть id и id > 0.
+  • CreateOrUpdateMany (test_02): 200, added==2, errors==0, в results два элемента с id.
+  • GET (test_03): 200, items — массив, в нём найдены A, B1, B2 по integrationId.
+  • Delete одного (test_04): 200/204, при наличии тела — deleted==1.
+  • POST с фильтром (test_05): 200, в items ровно B1 и B2 (два элемента).
+  • DeleteMany (test_06): 200/204, при наличии тела — deleted==2.
+  • Финальный GET (test_07): A, B1, B2 в списке отсутствуют.
+
+--------------------------------------------------------------------------------
+5. СХЕМА SMOKE-ПРОГОНА (ПОРЯДОК ТЕСТОВ)
+--------------------------------------------------------------------------------
+
+  [Начало smoke-прогона для сущности Unit или UnitGroup]
+
+      1. PUT .../CreateOrUpdate
+         └─ Создаём один объект (минимально валидный payload)
+         └─ Проверки: 200, added==1, errors==0, results[0].entity.id
+         └─ Сохраняем id и integrationId объекта (A)
+       ↓
+      2. PUT .../CreateOrUpdateMany
+         └─ Создаём два объекта (массив из 2 элементов)
+         └─ Проверки: 200, added==2, errors==0, в results два элемента с id
+         └─ Сохраняем id и integrationId двух объектов (B1, B2)
+       ↓
+      3. GET ... (pageNum=0, pageSize=50 или 500)
+         └─ Проверки: 200, items — массив, в нём есть A, B1, B2 (по integrationId)
+       ↓
+      4. PATCH .../Delete
+         └─ Удаляем объект A (по id)
+         └─ Проверки: 200/204, при наличии тела — deleted==1
+       ↓
+      5. POST ... (фильтр по integrationIds B1 и B2)
+         └─ Проверки: 200, в items ровно B1 и B2, len(items)==2
+       ↓
+      6. PATCH .../DeleteMany
+         └─ Удаляем массив [B1, B2] по id
+         └─ Проверки: 200/204, при наличии тела — deleted==2
+       ↓
+      7. GET ... (финальная проверка чистоты)
+         └─ Убеждаемся, что A, B1, B2 в items больше не возвращаются
+
+  [Конец smoke — все ключевые операции прошли, созданные сущности удалены]
+
+--------------------------------------------------------------------------------
+6. ПРИМЕРЫ КОДА (ФИКСТУРЫ И ТЕСТЫ)
+--------------------------------------------------------------------------------
+
+6.1. Маркеры и порядок (test_unit_smoke_flow.py)
+
+    @pytest.mark.smoke
+    @pytest.mark.order(1)
+    @pytest.mark.test_name_ru("Smoke: PUT /Unit/CreateOrUpdate — создание одного объекта")
+    def test_01_create_one(smoke_state, smoke_urls, admin_auth):
+        payload = build_unique_unit_payload()
+        response = _put_unit(smoke_urls["put_url"], payload=payload, auth=admin_auth)
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("added") == 1
+        smoke_state["unit_a_id"] = ...
+        smoke_state["unit_a_integration_id"] = payload.get("integrationId")
+
+6.2. Фикстура состояния (общая для Unit и UnitGroup по смыслу)
+
+    @pytest.fixture(scope="module")
+    def smoke_state():
+        return {
+            "unit_a_id": None,
+            "unit_a_integration_id": None,
+            "unit_b_ids": [],
+            "unit_b_integration_ids": [],
+        }
+
+  Для UnitGroup ключи: unitgroup_a_id, unitgroup_a_integration_id,
+  unitgroup_b_ids, unitgroup_b_integration_ids.
+
+6.3. Фикстура URL (Unit)
+
+    @pytest.fixture(scope="module")
+    def smoke_urls(base_server_url):
+        base = base_server_url.rstrip("/")
+        return {
+            "put_url": f"{base}/Unit/CreateOrUpdate",
+            "put_many_url": base,
+            "get_url": f"{base}/Unit",
+            "post_url": f"{base}/Unit",
+        }
+
+  Для UnitGroup подставляется UnitGroup вместо Unit в путях.
+
+6.4. Дополнительная фикстура для UnitGroup (baseUnit)
+
+    @pytest.fixture(scope="module")
+    def smoke_base_unit_ref(base_server_url, admin_auth):
+        return ensure_one_unit_and_get_ref(base_server_url, admin_auth)
+
+  Используется в test_01_create_one и test_02_create_many при построении payload
+  через build_unique_unitgroup_payload(smoke_base_unit_ref).
+
+--------------------------------------------------------------------------------
+7. КАК ЗАПУСКАТЬ SMOKE-ТЕСТЫ
+--------------------------------------------------------------------------------
+
+  Предварительно:
+    - Установить зависимости: pip install -r requirements.txt (в т.ч. pytest-order)
+    - .env с BASE_SERVER_URL, ADMIN_USERNAME, ADMIN_PASSWORD
+    - Запуск из каталога tests
+
+  Команды (из каталога tests):
+
+    Все smoke-тесты (Unit + UnitGroup):
+      pytest -m smoke -v -s
+
+    Только smoke Unit:
+      pytest api/unit/smoke -m smoke -v -s
+
+    Только smoke UnitGroup:
+      pytest api/unitgroup/smoke -m smoke -v -s
+
+    Только первые три теста (PUT, PUT many, GET) — Unit:
+      pytest api/unit/smoke -m smoke -k "test_01_create_one or test_02_create_many or test_03_get_list" -v -s
+
+    Только первые три теста — UnitGroup:
+      pytest api/unitgroup/smoke -m smoke -k "test_01_create_one or test_02_create_many or test_03_get_list" -v -s
+
+    Полный прогон без smoke (только старые тесты):
+      pytest -m "not smoke" -v -s
+
+  Опции -v и -s — как в основном обзоре (подробный вывод и показ print).
+
+--------------------------------------------------------------------------------
+8. КРАТКИЕ ВЫВОДЫ
+--------------------------------------------------------------------------------
+
+  • Добавлены два набора smoke-тестов: Unit (tests/api/unit/smoke/) и UnitGroup
+    (tests/api/unitgroup/smoke/) по одному и тому же сценарию из 7 шагов.
+  • Маркер smoke и плагин pytest-order позволяют запускать минимальные проверки
+    отдельно и в заданном порядке; созданные данные удаляются в конце сценария.
+  • Smoke не заменяют существующие тесты (fast/slow в api/unit и api/unitgroup),
+    а дополняют их отдельной папкой и отдельным маркером.
+  • Для UnitGroup в smoke добавлена фикстура smoke_base_unit_ref (одна Unit на
+    модуль для baseUnit во всех payload).
+  • Документация: данный файл в корне проекта; структура и стиль — по образцу
+    ОБЗОР_ПРОЕКТА_API_ТЕСТОВ.txt.
+
+================================================================================
+  Конец обзора изменений smoke-тестов
+================================================================================

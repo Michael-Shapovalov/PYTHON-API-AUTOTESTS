@@ -1,0 +1,2 @@
+"""ProcessTemplate smoke tests."""
+

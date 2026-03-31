@@ -1,0 +1,2 @@
+"""StorageArea smoke tests."""
+

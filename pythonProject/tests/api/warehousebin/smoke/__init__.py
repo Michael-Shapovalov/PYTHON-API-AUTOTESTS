@@ -1,0 +1,2 @@
+"""WarehouseBin smoke tests."""
+

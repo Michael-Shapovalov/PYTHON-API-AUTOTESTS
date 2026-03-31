@@ -1,0 +1,2 @@
+"""ManufacturingBillTemplate smoke tests."""
+

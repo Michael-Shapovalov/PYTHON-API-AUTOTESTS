@@ -1,0 +1,10 @@
+pytest
+pytest-order
+pytest-xdist
+requests
+python-dotenv
+testit-adapter-pytest==3.5.2
+httpx
+pydantic
+jsonschema
+jsonref

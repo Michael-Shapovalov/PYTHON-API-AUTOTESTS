@@ -1,0 +1,2 @@
+"""StorageArea API tests package."""
+
