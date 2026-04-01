@@ -3,6 +3,7 @@ SLA по времени ответа API: сбор метрик и warm-up по 
 Один запрос → один замер → один assert (кроме первого запроса на endpoint — WARMUP).
 """
 import time
+import os
 from typing import List, Dict, Any, Optional
 
 # Текущая категория SLA для теста (выставляется фикстурой из маркера rt_light/rt_medium/rt_heavy)
@@ -81,21 +82,79 @@ def clear() -> None:
     _records = []
 
 
+def _tk_prefix_from_current_test() -> str:
+    """
+    Возвращает префикс 'TK-<n>' для smoke-flow тестов по имени pytest-теста.
+    Используется только для заголовков шагов, которые отправляются в TestIT.
+    """
+    cur = os.environ.get("PYTEST_CURRENT_TEST") or ""
+    if "::" not in cur:
+        return ""
+    name = cur.split("::")[-1].split(" ", 1)[0].strip()
+    mapping = {
+        "test_01_create_one": "TK-1",
+        "test_01b_update_one": "TK-2",
+        "test_02_create_many": "TK-3",
+        "test_02b_update_many": "TK-4",
+        "test_03_get_list": "TK-5",
+        "test_04_delete_one": "TK-6",
+        "test_05_post_filter": "TK-7",
+        "test_06_delete_many": "TK-8",
+        "test_07_post_clean": "TK-9",
+    }
+    return mapping.get(name, "")
+
+
 def timed_request(service: str, method: str, path: str, category: str, request_fn):
     """
     Выполнить request_fn(). Время замеряется и проверяется только при первом вызове
     для данного endpoint; при превышении порога тест падает. Повторные вызовы — без замера.
     """
-    key = _endpoint_key(service, method, path)
-    if key in _warmup_seen:
-        return request_fn()
-    t0 = time.perf_counter()
-    result = request_fn()
-    dt = time.perf_counter() - t0
-    _warmup_seen.add(key)
-    record(service, method, path, category, dt)
-    threshold = THRESHOLDS.get(category, THRESHOLDS["rt_medium"])
-    assert dt <= threshold, (
-        f"SLA времени ответа: {service} {method} {path} — {dt:.3f} с > {threshold} с (категория {category})"
-    )
-    return result
+    # TestIT UI: центральная область "Описание" показывает setup/teardown/steps.
+    # Чтобы там появились шаги, оборачиваем каждый вызов endpoint в testit.step (если библиотека доступна).
+    try:
+        import testit as _testit  # type: ignore
+    except Exception:
+        _testit = None
+
+    tk = _tk_prefix_from_current_test()
+    step_title = f"{tk} {service}: {method} {path}".strip()
+
+    def _add_step_message(msg: str) -> None:
+        if _testit is None:
+            return
+        try:
+            _testit.addMessage(msg)
+        except Exception:
+            # Не ломаем тесты из-за проблем TMS
+            pass
+
+    def _run():
+        key = _endpoint_key(service, method, path)
+        if key in _warmup_seen:
+            result = request_fn()
+            status_code = getattr(result, "status_code", None)
+            _add_step_message(
+                f"категория={category}; замер=нет; статус={status_code if status_code is not None else 'n/a'}"
+            )
+            return result
+        t0 = time.perf_counter()
+        result = request_fn()
+        dt = time.perf_counter() - t0
+        _warmup_seen.add(key)
+        record(service, method, path, category, dt)
+        threshold = THRESHOLDS.get(category, THRESHOLDS["rt_medium"])
+        status_code = getattr(result, "status_code", None)
+        _add_step_message(
+            f"категория={category}; замер=да; время={dt:.3f}с; порог={threshold}с; статус={status_code if status_code is not None else 'n/a'}"
+        )
+        assert dt <= threshold, (
+            f"SLA времени ответа: {service} {method} {path} — {dt:.3f} с > {threshold} с (категория {category})"
+        )
+        return result
+
+    if _testit is None:
+        return _run()
+
+    with _testit.step(step_title):
+        return _run()

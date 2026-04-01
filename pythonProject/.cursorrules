@@ -19,6 +19,13 @@
 - **Маркеры pytest** используются для:
   - разделения наборов тестов (`smoke`, `regression` и т.п.),
   - задания категории времени ответа (`rt_light`, `rt_medium`, `rt_heavy`).
+- **TestIT (обязательное правило для новых smoke‑тестов)**:
+  - каждый smoke‑тест должен иметь декораторы `@testit.externalId / @testit.displayName / @testit.title / @testit.description / @testit.nameSpace / @testit.className / @testit.labels`;
+  - `@testit.description` всегда берём из `tests.utils.testit_smoke_docs.get_smoke_tc_description("<entity>", <tk_num>)`;
+  - для новой сущности всегда создавать `docs/<entity>/checks_smoke.md` в формате `### ТК-1.` … `### ТК-9.` + блоки `**Предусловия:**`, `**Шаги:**`, `**Ожидаемый результат:**` (иначе TestIT будет показывать заглушки “описание не найдено”);
+  - после добавления/изменения smoke‑тестов обязательно синхронизировать библиотеку TestIT скриптом:
+    - `python tools/testit_sync_autotests.py`
+  - pytest‑адаптер используется для результатов прогонов (`--testit`), а создание/обновление записей в библиотеке автотестов делается через скрипт (он заполняет required attributes).
 
 ---
 
